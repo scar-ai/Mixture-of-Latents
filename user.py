@@ -13,7 +13,6 @@ vocab_size = len(tokenizer)
 
 N_HEADS = 16
 D_MODEL = 1280
-HEAD_SIZE = D_MODEL // N_HEADS
 DROPOUT = 0.1
 N_BLOCKS = 12
 LATENT_DIM = 512
