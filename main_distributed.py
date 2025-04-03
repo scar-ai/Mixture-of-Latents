@@ -112,7 +112,7 @@ def main():
 
     print(sum(p.numel() for p in model.parameters()) / 1e6, 'M parameters')
 
-    base_lr = 1e-5
+    base_lr = 2.4e-4
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=base_lr, weight_decay=0.01, betas=(0.9, 0.95))
 
