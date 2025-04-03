@@ -21,7 +21,7 @@ A scheduler with warmup and step decay was used where the peak learning rate was
 The model was trained on batches of 64 sequences of 512 tokens.
 
 ## Performance
-In benchmark testing, Latentformer (set up for 348M parameters with 12 layers, 16 attention heads, 1280 embedding dimension and 256 latent dimension) achieved a validation perplexity of 36 after 2 hours and 40 minutes of training on a node of 8 AMD MI300X GPUs using the OpenWebText dataset.
+In benchmark testing, Latentformer (set up for 348M parameters with 12 layers, 16 attention heads, 1280 embedding dimension and 512 latent dimension) achieved a validation perplexity of 36 after 2 hours and 40 minutes of training on a node of 8 AMD MI300X GPUs using the OpenWebText dataset.
 
 ## Additionnal information
 - I provided with a rudimentary autoregressive training loop, however KV caching is not yet implemented.
