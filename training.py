@@ -76,27 +76,6 @@ train_dataloader = DataLoader(dataset, batch_size=64, shuffle=True, collate_fn =
 test_dataloader = DataLoader(dataset, batch_size=32, shuffle=True, collate_fn = data_collator)
 print(next(iter(train_dataloader)))
 
-
-
-class TokenDrop(nn.Module):
-    def __init__(self, prob=0.1, pad_token=0, num_special=4):
-        self.prob = prob
-        self.num_special = num_special
-        self.pad_token = pad_token
-
-    def __call__(self, sample):
-
-        mask = torch.bernoulli(self.prob * torch.ones_like(sample)).long()
-        can_drop = (sample >= self.num_special).long()
-        mask = mask * can_drop
-        
-        replace_with = (self.pad_token * torch.ones_like(sample)).long()
-        
-        sample_out = (1 - mask) * sample + mask * replace_with
-        
-        return sample_out
-
-
 #--------------------------------------------------
 # Model Loading
 #--------------------------------------------------
@@ -162,11 +141,6 @@ class WarmupAndStep(_LRScheduler):
         return self.current_lrs
 
 scheduler = WarmupAndStep(optimizer=optimizer, warmup_steps= 2000, plateaus1= 12000, plateaus2=18000, decay_factor=0.316)
-
-
-
-
-#td = TokenDrop(prob=0)
 
 #--------------------------------------------------
 # Training Function
