@@ -1,5 +1,5 @@
 # The-Latentformer
-Latentformer is a transformer model with latent attention designed for efficient training. It features learnable positional embeddings, rotary position encoding, and MLA to optimize speed and performance while maintaining model quality.
+Latentformer is a transformer model with multihead latent attention (MLA) designed for efficient training. 
 
 ## Model Architecture and Training
 
@@ -11,7 +11,7 @@ The model employs my interpretation of the latent attention mechanism introduced
 This design reduces computational overhead while preserving model expressiveness. The attention computation is split between two parallel paths for the Q and K channels: one processes compressed representations, while the other handles rotary position-encoded features before concatenating both paths and calculating the attention scores while the V channel is directly obtained from the compressed KV representation.
 
 ### Positional Encoding
-Latentformer combines learnable positional encoding with rotary position encoding (RoPE from the [Roformer paper](https://arxiv.org/pdf/2104.09864)).
+Latentformer uses both learnable positional encoding and rotary position encoding within the attention computation (RoPE from the [Roformer paper](https://arxiv.org/pdf/2104.09864)).
 The learnable component adaptively scales and shifts sinusoidal patterns during training, allowing the model to optimize position representation.
 While in the attention mechanism, RoPE provides efficient relative position handling in `d_rope` dimensions by applying rotations to the Q and K attention channels.
 
