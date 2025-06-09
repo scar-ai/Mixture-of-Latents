@@ -3,7 +3,7 @@ from model import TheTransformer
 from torch.nn import functional as F
 from transformers import AutoTokenizer
 
-device = "cuda"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 tokenizer = AutoTokenizer.from_pretrained("gpt2")
 tokenizer.add_special_tokens({'pad_token': '[PAD]'})
