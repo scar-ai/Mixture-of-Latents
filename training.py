@@ -20,7 +20,7 @@ from torch.optim.lr_scheduler import _LRScheduler
 # Data Preparation
 #--------------------------------------------------
 
-device = torch.device("cuda:7")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 tokenizer = AutoTokenizer.from_pretrained("gpt2")
