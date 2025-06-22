@@ -26,3 +26,4 @@ In benchmark testing, Latentformer (set up for 348M parameters with 12 layers, 1
 ## Additionnal information
 - I provided with a rudimentary autoregressive training loop, however KV caching is not yet implemented.
 - Use torchrun to run the DDP script: ``torchrun --nproc_per_node=<amount of GPUs in the node> main_distributed.py``
+- The MoE model comes with a streamlit user interface, use ``streamlit run ./user.py`` to run it
