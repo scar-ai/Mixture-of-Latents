@@ -6,8 +6,8 @@ from torch.optim.lr_scheduler import _LRScheduler
 import math
 import time
 
-from model import TheTransformer
-from OpenWebText import OpenWebTextDataset
+from MoE import TheTransformer
+from OWT import OpenWebTextDataset
 
 from transformers import DataCollatorForLanguageModeling, AutoTokenizer
 
@@ -18,7 +18,7 @@ import os
 # Data Preparation
 #--------------------------------------------------
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:4" if torch.cuda.is_available() else "cpu")
 n_gpus = torch.cuda.device_count()
 print(f"Using device: {device}, Number of GPUs: {n_gpus}")
 
@@ -28,7 +28,11 @@ tokenizer.add_special_tokens({'pad_token': '[PAD]'})
 vocab_size = len(tokenizer)
 
 
-class ShiftedDataCollatorForLanguageModeling(DataCollatorForLanguageModeling):
+class ShiftedDataCollatorForLanguageModelingWithTokenDrop(DataCollatorForLanguageModeling):
+    def __init__(self, tokenizer, mlm=False, drop_prob=0.1):
+        super().__init__(tokenizer, mlm)
+        self.drop_prob = drop_prob
+    
     def __call__(self, features):
         batch = super().__call__(features)
 
@@ -37,6 +41,15 @@ class ShiftedDataCollatorForLanguageModeling(DataCollatorForLanguageModeling):
         shifted_attention_masks = []
 
         input_ids, labels, attention_mask = batch["input_ids"], batch["labels"], batch["attention_mask"]
+
+        if self.drop_prob > 0:
+            drop_mask = torch.rand_like(input_ids.float()) > self.drop_prob
+            drop_mask[:, 0] = True
+            drop_mask[input_ids == self.tokenizer.pad_token_id] = True
+            
+            input_ids = input_ids * drop_mask.long()
+            input_ids[~drop_mask] = self.tokenizer.pad_token_id
+            attention_mask = attention_mask * drop_mask.long()
 
         shifted_input = input_ids[:, 0:-1].squeeze(0)
         shifted_input_ids.append(shifted_input)
@@ -69,7 +82,7 @@ def setup_ddp():
     return rank, local_rank
 
 def cleanup_ddp():
-    dist.destroy_grocess_group()
+    dist.destroy_process_group()
 
 #--------------------------------------------------
 # Main Training Function
@@ -84,28 +97,30 @@ def main():
     tokenizer.add_special_tokens({'pad_token': '[PAD]'})
     vocab_size = len(tokenizer)
 
-    dataset = OpenWebTextDataset(tokenizer=tokenizer, device=device, split='train', max_length=512, load_path=r"../Transformerv2/data/openweb/train")
+    dataset = OpenWebTextDataset(tokenizer=tokenizer, device=device, split='train', max_length=512, load_path=r"../DenseAttention/data/openweb/train")
 
-    data_collator = ShiftedDataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+    data_collator = ShiftedDataCollatorForLanguageModelingWithTokenDrop(tokenizer=tokenizer, mlm=False, drop_prob=0)
 
     train_sampler = DistributedSampler(dataset)
 
     train_dataloader = DataLoader(dataset, batch_size=64, sampler=train_sampler, collate_fn=data_collator)
     
-    N_HEADS = 16
-    D_MODEL = 1280
+    N_HEADS = 20
+    D_MODEL = 1600
     DROPOUT = 0.1
     N_BLOCKS = 12
-    LATENT_DIM = 512
+    LATENT_DIM = 256
 
     model = TheTransformer(vocab_size=vocab_size, num_heads=N_HEADS, n_layers=N_BLOCKS, d_model=D_MODEL, latent_dim=LATENT_DIM,
-                        ignore_index=tokenizer.pad_token_id, dropout=DROPOUT).to(device)
+                        ignore_index=tokenizer.pad_token_id, dropout=DROPOUT, num_experts=18, topk_experts=2).to(device)
+    torch.autograd.set_detect_anomaly(True)
 
-    scaler = torch.amp.GradScaler(device)
+    scaler = torch.amp.GradScaler()
+
     model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], find_unused_parameters=True)
      
-    checkpoint = torch.load(r"weights/fast_distributed1.pth", weights_only=True, map_location=torch.device(device))
-    model.load_state_dict(checkpoint)
+    """checkpoint = torch.load(r"weights/conv.pth", weights_only=True, map_location=torch.device(device))
+    model.load_state_dict(checkpoint)"""
 
     for param in model.parameters():
         param.requires_grad = True
@@ -113,7 +128,6 @@ def main():
     print(sum(p.numel() for p in model.parameters()) / 1e6, 'M parameters')
 
     base_lr = 2.4e-4
-
     optimizer = torch.optim.AdamW(model.parameters(), lr=base_lr, weight_decay=0.01, betas=(0.9, 0.95))
 
     class WarmupAndStep(_LRScheduler):
@@ -134,34 +148,37 @@ def main():
             
             return self.current_lrs
 
-    scheduler = WarmupAndStep(optimizer=optimizer, warmup_steps= 2000, plateaus1= 12000, plateaus2=18000, decay_factor=0.316)
+    scheduler = WarmupAndStep(optimizer=optimizer, warmup_steps=2000, plateaus1=16000, plateaus2=18000, decay_factor=0.316)
 
-    n_epochs = 5
+    n_epochs = 1
     
     t1=time.time()
-    
     for epoch in range(n_epochs):
         train_sampler.set_epoch(epoch)
         model.train()
-        optimizer.zero_grad()
         
         running_loss = 0
         total_tokens = 0
 
+        
+
         for index, element in enumerate(train_dataloader):
-            text = (element["input_ids"].squeeze(0)).to(device)
+            optimizer.zero_grad()
+            
+            text = element["input_ids"].squeeze(0).to(device)
             label = element["labels"].squeeze(0).to(device)
             attention_mask = element["attention_mask"].squeeze(0).to(device)
 
-            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+            with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
                 _, loss = model(x=text, targets=label, mask=attention_mask)
-            
+
             running_loss += loss.item() * text.numel()
             total_tokens += text.numel()
-            
+
             scaler.scale(loss).backward()
+
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
 
             scaler.step(optimizer)
             scaler.update()
@@ -172,9 +189,10 @@ def main():
                 avg_loss = running_loss / total_tokens
                 perplexity = math.exp(avg_loss)
                 t2 = time.time()
+                
                 clr = scheduler.get_last_lr()[0]
-                print(f"Epoch {epoch}, Step {index}/{len(train_dataloader)}, LR: {clr}, Loss: {avg_loss}, Perplexity: {perplexity} - time elapsed: {(t2-t1)/60}")
-                torch.save(model.state_dict(), "weights/fast_distributed1.pth")
+                print(f"Epoch {epoch}, Step {index}/{len(train_dataloader)}, LR: {clr}, Loss: {avg_loss}, Perplexity: {perplexity} - time: {(t2-t1)/60}")
+                torch.save(model.state_dict(), "weights/large.pth")
 
     cleanup_ddp()
 
