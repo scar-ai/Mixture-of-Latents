@@ -89,7 +89,7 @@ class MultiHeadAttention(nn.Module):
         self.out_proj = nn.Linear(embed_dim, embed_dim)
         self.dropout = nn.Dropout(dropout)
 
-    def generate_mask(self, seq_len, device):
+    def generate_causal_mask(self, seq_len, device):
         mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool, device=device), diagonal=1)
         return mask
 
@@ -97,7 +97,7 @@ class MultiHeadAttention(nn.Module):
         batch_size, seq_len, _ = x.shape
 
         if mask is None:
-            mask = self.generate_mask(seq_len, x.device)
+            mask = self.generate_causal_mask(seq_len, x.device)
 
         C_Q_proj = self.activation(self.C_Q(x))
         C_Q_C_proj = self.C_Q_C(C_Q_proj)
@@ -120,9 +120,11 @@ class MultiHeadAttention(nn.Module):
 
         attn_scores = torch.matmul(Q, K.transpose(-2, -1)) * self.scale
 
+        attn_scores = attn_scores.clamp(min=-1e4, max=1e4)
         attn_scores = attn_scores.masked_fill(mask.unsqueeze(0).unsqueeze(0), float('-inf'))
 
         attn_weights = F.softmax(attn_scores, dim=-1)
+        attn_weights = torch.nan_to_num(attn_weights, nan=0.0, posinf=0.0, neginf=0.0)
         attn_weights = self.dropout(attn_weights)
 
         attn_output = torch.matmul(attn_weights, V)
@@ -131,38 +133,100 @@ class MultiHeadAttention(nn.Module):
         
         return self.out_proj(attn_output)
 
+class GatingNetwork(nn.Module):
+    def __init__(self, embed_dim, num_experts, top_k, noise_std=1.0):
+        super(GatingNetwork, self).__init__()
+        self.num_experts = num_experts
+        self.top_k = top_k
+        self.noise_std = noise_std
+        self.W_g = nn.Parameter(torch.randn(embed_dim, num_experts))
+        self.W_noise = nn.Parameter(torch.randn(embed_dim, num_experts))
 
+    def forward(self, x):
+        logits = x @ self.W_g
+        noise = torch.randn_like(logits) * self.noise_std
+        noise = noise * F.softplus(x @ self.W_noise).clamp(max=10)
+        noisy_logits = logits + noise
+
+
+        top_k_values, top_k_indices = torch.topk(noisy_logits, self.top_k, dim=-1)
+        top_k_gates = F.softmax(top_k_values.float(), dim=-1).type_as(top_k_values)
+        top_k_gates = torch.nan_to_num(top_k_gates, nan=0.0, posinf=0.0, neginf=0.0)
+        return top_k_gates, top_k_indices
+    
+class FeedForward(nn.Module):
+    def __init__(self, n_embd, dropout):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(n_embd, 4 * n_embd),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(4 * n_embd, n_embd),
+        )
+
+    def forward(self, x):
+        return self.net(x)
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model, num_heads, latent_dim, dropout):
+    def __init__(self, embed_dim, num_heads, latent_dim, dropout, num_experts, topk_experts):
         super().__init__()
-        self.attn = MultiHeadAttention(d_model, num_heads, latent_dim, dropout)
-        self.norm1 = nn.LayerNorm(d_model)
-        self.ff = nn.Sequential(
-            nn.Linear(d_model, d_model*4),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(d_model*4, d_model)
-        )
-        self.norm2 = nn.LayerNorm(d_model)
+        self.embed_dim = embed_dim
+
+
+        self.attn = MultiHeadAttention(embed_dim, num_heads, latent_dim, dropout)
+        self.ln1 = nn.LayerNorm(embed_dim, eps=1e-5)
+        self.dr1 = nn.Dropout(dropout)
+
+
+        self.ln2 = nn.LayerNorm(embed_dim, eps=1e-5)
+        self.dr2 = nn.Dropout(dropout)
+        self.gating = GatingNetwork(embed_dim=embed_dim, num_experts=num_experts, top_k=topk_experts, noise_std=0.1)
+        self.experts = nn.ModuleList([FeedForward(embed_dim, dropout) for _ in range(num_experts)])
 
     def forward(self, x):
-        norm_x = self.norm1(x)
-        x = self.attn(norm_x) + x
-        norm_x = self.norm2(x)
-        x = self.ff(x) + x
+
+        residual = x
+        
+        norm_x = self.ln1(x)
+        attn_out = self.dr1(self.attn(norm_x))
+        x = attn_out + residual
+        
+        residual = x
+        norm_x = self.ln2(x)
+        top_k_gates, top_k_indices = self.gating(norm_x)
+        
+        batch, seq, _ = norm_x.shape
+        flattened_x = norm_x.view(-1, self.embed_dim)
+        flattened_gates = top_k_gates.view(-1, top_k_gates.size(-1))
+        flattened_indices = top_k_indices.view(-1, top_k_indices.size(-1))
+
+        output = torch.zeros_like(flattened_x)
+        for expert_idx, expert in enumerate(self.experts):
+            mask = (flattened_indices == expert_idx)
+            rows = torch.any(mask, dim=1).nonzero(as_tuple=True)[0]
+            if rows.numel() == 0:
+                continue
+                
+            token_gates = flattened_gates[rows] * mask[rows].float()
+            token_gates = token_gates.sum(dim=1)
+            
+            expert_out = expert(flattened_x[rows])
+            output[rows] += expert_out * token_gates.unsqueeze(-1)
+        
+        experts_output = output.view(batch, seq, self.embed_dim)
+        x = self.dr2(experts_output) + residual
         return x
 
 
 class TheTransformer(nn.Module):
-    def __init__(self, vocab_size, num_heads, n_layers, d_model, latent_dim, ignore_index, dropout):
+    def __init__(self, vocab_size, num_heads, n_layers, d_model, latent_dim, ignore_index, dropout, num_experts, topk_experts):
         super().__init__()
         self.ignore_index = ignore_index
         self.embed = nn.Embedding(vocab_size, d_model)
         self.positional_encoding = LearnablePosEmb(d_model)
         self.layers = nn.ModuleList([
-            TransformerBlock(d_model, num_heads, latent_dim, dropout)
+            TransformerBlock(d_model, num_heads, latent_dim, dropout, num_experts, topk_experts)
             for _ in range(n_layers)
         ])
          
@@ -179,9 +243,13 @@ class TheTransformer(nn.Module):
             x = layer(x)
 
         logits = self.fc(x)
+        logits = logits.clamp(min=-50, max=50)
+        logits = torch.nan_to_num(logits, nan=0.0, posinf=0.0, neginf=0.0)
 
         if targets is not None:
             loss = (F.cross_entropy(
-                logits.transpose(1, 2), targets, ignore_index=self.ignore_index) * mask).sum()/mask.sum()
+                logits.transpose(1, 2).float(), targets, ignore_index=self.ignore_index) * mask).sum()/mask.sum()
+            if not torch.isfinite(loss):
+                loss = torch.tensor(0.0, device=logits.device)
             return logits, loss
         return logits
