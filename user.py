@@ -40,11 +40,11 @@ def load_model_and_tokenizer():
     ).to(device)
 
     try:
-        checkpoint = torch.load(r"weights/MLA+MoE_Finetuned.pth", map_location=device, weights_only=False)
+        checkpoint = torch.load(r"weights/mol.pth", map_location=device, weights_only=False)
         new_state_dict = {key.replace("module.", ""): value for key, value in checkpoint.items()}
         model.load_state_dict(new_state_dict)
     except FileNotFoundError:
-        st.error("Weight file not found. Make sure 'weights/MLA+MoE_Finetuned.pth' exists.")
+        st.error("Weight file not found. Make sure 'weights/mol.pth' exists.")
         return None, None, None
     except Exception as e:
         st.error(f"An error occurred while loading the model: {e}")
