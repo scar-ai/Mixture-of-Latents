@@ -3,7 +3,7 @@
 [![Language](https://img.shields.io/badge/Language-Python-blue.svg)](https://www.python.org/)
 [![Framework](https://img.shields.io/badge/Framework-PyTorch-orange.svg)](https://pytorch.org/)
 
-![](https://seeklogo.com/vector-logo/372199/pytorch)
+![alt](https://seeklogo.com/vector-logo/372199/pytorch)
 
 This repository contains the complete implementation of a sophisticated Transformer-based language model, featuring a unique **Mixture-of-Latents Attention (MLA)** mechanism and a **Mixture-of-Experts (MoE)** feed-forward layer. The model is designed for high-performance text generation and is built to scale efficiently using distributed training.
 
