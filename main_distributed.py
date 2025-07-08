@@ -119,7 +119,7 @@ def main():
 
     model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], find_unused_parameters=True)
      
-    """checkpoint = torch.load(r"weights/conv.pth", weights_only=True, map_location=torch.device(device))
+    """checkpoint = torch.load(r"weights/mol.pth", weights_only=True, map_location=torch.device(device))
     model.load_state_dict(checkpoint)"""
 
     for param in model.parameters():
@@ -192,7 +192,7 @@ def main():
                 
                 clr = scheduler.get_last_lr()[0]
                 print(f"Epoch {epoch}, Step {index}/{len(train_dataloader)}, LR: {clr}, Loss: {avg_loss}, Perplexity: {perplexity} - time: {(t2-t1)/60}")
-                torch.save(model.state_dict(), "weights/large.pth")
+                torch.save(model.state_dict(), "weights/mol.pth")
 
     cleanup_ddp()
 
