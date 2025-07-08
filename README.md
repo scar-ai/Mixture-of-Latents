@@ -6,14 +6,16 @@
 
 This repository contains the complete implementation of a sophisticated Transformer-based language model, featuring a unique **Mixture-of-Latents Attention (MLA)** mechanism and a **Mixture-of-Experts (MoE)** feed-forward layer. The model is designed for high-performance text generation and is built to scale efficiently using distributed training.
 
+A regular transformer version of this model (single FFN, no routing) beat gpt-2 large in 2h36 when trained on a node of 8 AMD MI300X with ~300M parameters.
+
 This project provides the full codebase, from the architectural backbone and data processing pipelines to single-GPU and distributed training scripts, and a ready-to-use interactive Streamlit application for inference.
 
 ## ✨ Key Features
 
--   **Mixture-of-Latents Attention (MLA):** A novel attention mechanism that splits query and key projections into two paths: a content-based path and a rotary-based path. This allows the model to separately process and weigh contextual information and positional information, leading to more nuanced text generation.
+-   **Mixture-of-Latents Attention (MLA):** A novel attention mechanism first introduced in the [Deepseek-V3 paper](https://arxiv.org/pdf/2412.19437) that splits query and key projections into two paths: a content-based path and a rotary-based path. This allows the model to separately process and weigh contextual information and positional information, leading to more nuanced text generation.
 -   **Mixture-of-Experts (MoE) Layers:** The feed-forward network in each Transformer block is replaced with a sparse MoE layer. This allows the model to have a very high parameter count while only activating a small subset of "expert" networks for each token, drastically improving training and inference efficiency.
--   **Rotary Position Embeddings (RoPE):** Implements state-of-the-art relative position embeddings, which are seamlessly integrated into the MLA mechanism.
--   **Distributed Training Ready:** Includes a script (`main_distributed.py`) that leverages PyTorch's `DistributedDataParallel` (DDP) for robust and scalable multi-GPU training.
+-   **Rotary Position Embeddings (RoPE):** Implements state-of-the-art relative position embeddings, which are embedded into the MLA mechanism.
+-   **Distributed Training Ready:** Includes a script (`main_distributed.py`) that leverages PyTorch's `DistributedDataParallel` (DDP) for robust and scalable multi-GPU training (tested on a node of 8 AMD MI300X).
 -   **Custom Data Pipeline:** A dedicated data loader (`OpenWebText.py`) for processing the OpenWebText dataset, including on-the-fly tokenization, cleaning, and batching.
 -   **Interactive Demo:** A user-friendly Streamlit application (`user.py`) to interact with the trained model, featuring real-time text generation and adjustable sampling parameters.
 
