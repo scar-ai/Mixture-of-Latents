@@ -1,29 +1,57 @@
-# The-Latentformer
-Latentformer is a transformer model with multihead latent attention (MLA) designed for efficient training. 
+# Advanced MoE Transformer with Mixture-of-Latents Attention
 
-## Model Architecture and Training
+[![Language](https://img.shields.io/badge/Language-Python-blue.svg)](https://www.python.org/)
+[![Framework](https://img.shields.io/badge/Framework-PyTorch-orange.svg)](https://pytorch.org/)
+[![Library](https://img.shields.io/badge/Library-HuggingFace-yellow.svg)](https://huggingface.co/)
 
-### Latent Attention
-The model employs my interpretation of the latent attention mechanism introduced by the [deepseekv2 paper](https://arxiv.org/pdf/2405.04434). It projects queries and keys through a compressed `d_compressed`-dimensional bottleneck layer.
+This repository contains the complete implementation of a sophisticated Transformer-based language model, featuring a unique **Mixture-of-Latents Attention (MLA)** mechanism and a **Mixture-of-Experts (MoE)** feed-forward layer. The model is designed for high-performance text generation and is built to scale efficiently using distributed training.
 
-![Deepseek's MLA architechture](https://towardsdatascience.com/wp-content/uploads/2025/01/15MvV9YDPmc37axJe60w8Ag.png)
+This project provides the full codebase, from the architectural backbone and data processing pipelines to single-GPU and distributed training scripts, and a ready-to-use interactive Streamlit application for inference.
 
-This design reduces computational overhead while preserving model expressiveness. The attention computation is split between two parallel paths for the Q and K channels: one processes compressed representations, while the other handles rotary position-encoded features before concatenating both paths and calculating the attention scores while the V channel is directly obtained from the compressed KV representation.
+## ✨ Key Features
 
-### Positional Encoding
-Latentformer uses both learnable positional encoding and rotary position encoding within the attention computation (RoPE from the [Roformer paper](https://arxiv.org/pdf/2104.09864)).
-The learnable component adaptively scales and shifts sinusoidal patterns during training, allowing the model to optimize position representation.
-While in the attention mechanism, RoPE provides efficient relative position handling in `d_rope` dimensions by applying rotations to the Q and K attention channels.
+-   **Mixture-of-Latents Attention (MLA):** A novel attention mechanism that splits query and key projections into two paths: a content-based path and a rotary-based path. This allows the model to separately process and weigh contextual information and positional information, leading to more nuanced text generation.
+-   **Mixture-of-Experts (MoE) Layers:** The feed-forward network in each Transformer block is replaced with a sparse MoE layer. This allows the model to have a very high parameter count while only activating a small subset of "expert" networks for each token, drastically improving training and inference efficiency.
+-   **Rotary Position Embeddings (RoPE):** Implements state-of-the-art relative position embeddings, which are seamlessly integrated into the MLA mechanism.
+-   **Distributed Training Ready:** Includes a script (`main_distributed.py`) that leverages PyTorch's `DistributedDataParallel` (DDP) for robust and scalable multi-GPU training.
+-   **Custom Data Pipeline:** A dedicated data loader (`OpenWebText.py`) for processing the OpenWebText dataset, including on-the-fly tokenization, cleaning, and batching.
+-   **Interactive Demo:** A user-friendly Streamlit application (`user.py`) to interact with the trained model, featuring real-time text generation and adjustable sampling parameters.
 
-### Training Pipeline
-The model was trained distributed training using PyTorch's DDP and mixed-precision (FP16) training.
-A scheduler with warmup and step decay was used where the peak learning rate was 2.4e-4 to make converging easier on later stages of the training.
-The model was trained on batches of 64 sequences of 512 tokens.
+## 📂 Repository Structure & File Guide
 
-## Performance
-In benchmark testing, Latentformer (set up for 348M parameters with 12 layers, 16 attention heads, 1280 embedding dimension and 512 latent dimension) achieved a validation perplexity of 36 after 2 hours and 40 minutes of training on a node of 8 AMD MI300X GPUs using the OpenWebText dataset.
+This repository is organized to provide a clear path from understanding the model's architecture to training it and finally using it for inference.
 
-## Additionnal information
-- I provided with a rudimentary autoregressive training loop, however KV caching is not yet implemented.
-- Use torchrun to run the DDP script: ``torchrun --nproc_per_node=<amount of GPUs in the node> main_distributed.py``
-- The MoE model comes with a streamlit user interface, use ``streamlit run ./user.py`` to run it
+### 1. Model Architecture
+
+-   **`model.py`**: This is the heart of the project. It defines the complete model architecture, including:
+    -   `TheTransformer`: The main class that assembles the entire model.
+    -   `MultiHeadAttention`: The custom Mixture-of-Latents Attention implementation.
+    -   `GatingNetwork` & `TransformerBlock`: The core components for the Mixture-of-Experts (MoE) layers.
+    -   `RotaryPositionEncoding`: The implementation for RoPE.
+
+### 2. Training the Model
+
+The repository includes two scripts for training the model, catering to different hardware setups.
+
+-   **`training.py` (Single-GPU Training)**
+    -   **Purpose:** A straightforward script for training the model on a single GPU.
+    -   **Details:** It handles data loading, model initialization, a standard training loop with mixed-precision support (`torch.amp`), and a custom learning rate scheduler.
+    -   **Use Case:** Ideal for debugging, running smaller-scale experiments, or for users who do not have a multi-GPU environment.
+
+-   **`main_distributed.py` (Multi-GPU Distributed Training)**
+    -   **Purpose:** The primary script for training the full-scale model efficiently across multiple GPUs.
+    -   **Details:** It leverages PyTorch's `DistributedDataParallel` (DDP) and `DistributedSampler` to parallelize the training process. It also includes an optional token-dropping feature as a regularization technique.
+    -   **Use Case:** The recommended script for training the model from scratch to achieve the best performance on large datasets.
+
+### 3. Using the Model for Inference
+
+-   **`user.py` (Interactive Streamlit Demo)**
+    -   **Purpose:** A web-based application for generating text with the trained model.
+    -   **How to Use:**
+        1.  Ensure you have a trained model checkpoint (e.g., `weights/MLA+MoE_Finetuned.pth`). The script is pre-configured to look for this file.
+        2.  Install the required Python packages: `pip install -r requirements.txt`.
+        3.  Run the application from your terminal:
+            ```bash
+            streamlit run user.py
+            ```
+    -   **Features:** The interface allows you to provide an instruction and input, and control the generation process with sliders for `Temperature`, `Top-K`, `Top-P`, and `Repetition Penalty`. The model's response is streamed token-by-token for an interactive experience.
