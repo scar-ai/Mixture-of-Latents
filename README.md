@@ -49,10 +49,9 @@ The repository includes two scripts for training the model, catering to differen
 -   **`user.py` (Interactive Streamlit Demo)**
     -   **Purpose:** A web-based application for generating text with the trained model.
     -   **How to Use:**
-        1.  Ensure you have a trained model checkpoint (e.g., `weights/MLA+MoE_Finetuned.pth`). The script is pre-configured to look for this file.
+        1.  Ensure you have a trained model checkpoint (e.g., `weights/mol.pth`). The script is pre-configured to look for this file.
         2.  Install the required Python packages: `pip install -r requirements.txt`.
         3.  Run the application from your terminal:
             ```bash
             streamlit run user.py
             ```
-    -   **Features:** The interface allows you to provide an instruction and input, and control the generation process with sliders for `Temperature`, `Top-K`, `Top-P`, and `Repetition Penalty`. The model's response is streamed token-by-token for an interactive experience.
