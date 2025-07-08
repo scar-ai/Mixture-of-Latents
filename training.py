@@ -224,7 +224,7 @@ def train(model: nn.Module, n_epochs: int, optimizer, scheduler, dataloader, sav
         
 
 #train(model=model, n_epochs=n_epochs, optimizer=optimizer , dataloader=train_dataloader, scheduler=None,
-#      save_path=r"weights/normal1.pth")
+#      save_path=r"weights/mol.pth")
 
         
         
@@ -272,4 +272,4 @@ def validate(model: nn.Module, n_epochs: int, dataloader, device, load_path=None
                     avg_perplexity = math.exp(avg_loss)
                     print(f'Step {index}/{len(dataloader)} - Loss: {avg_loss:.4f} - Accuracy: {avg_accu:.2f}% - Perplexity: {avg_perplexity:.2f}')
 
-validate(model = model, n_epochs=1, dataloader=test_dataloader, load_path=r"weights/fast_distributed1.pth", device=device)
+validate(model = model, n_epochs=1, dataloader=test_dataloader, load_path=r"weights/mol.pth", device=device)
