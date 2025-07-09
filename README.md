@@ -1,4 +1,4 @@
-# Advancing MoE with Mixture-of-Latents
+# Advancing MoE with Mixture-of-Latent Attention
 
 [![Language](https://img.shields.io/badge/Language-Python-blue.svg)](https://www.python.org/)
 [![Framework](https://img.shields.io/badge/Framework-PyTorch-orange.svg)](https://pytorch.org/)
