@@ -1,4 +1,4 @@
-# Advancing MoE Transformers with Mixture-of-Latents Attention
+# Advancing MoE with Mixture-of-Latents
 
 [![Language](https://img.shields.io/badge/Language-Python-blue.svg)](https://www.python.org/)
 [![Framework](https://img.shields.io/badge/Framework-PyTorch-orange.svg)](https://pytorch.org/)
