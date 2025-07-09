@@ -1,9 +1,9 @@
-# Advancing MoE with Mixture-of-Latent Attention
+# Advancing MoE with Latentformer
 
 [![Language](https://img.shields.io/badge/Language-Python-blue.svg)](https://www.python.org/)
 [![Framework](https://img.shields.io/badge/Framework-PyTorch-orange.svg)](https://pytorch.org/)
 
-This repository contains the complete implementation of a sophisticated Transformer-based language model, featuring a unique **Mixture-of-Latents Attention (MLA)** mechanism and a **Mixture-of-Experts (MoE)** feed-forward layer. The model is designed for high-performance text generation and is built to scale efficiently using distributed training.
+This repository contains the complete implementation of a sophisticated Transformer-based language model, featuring a unique **Multi Latent Attention (MLA)** mechanism and a **Mixture-of-Experts (MoE)** feed-forward layer. The model is designed for high-performance text generation and is built to scale efficiently using distributed training.
 
 A regular transformer version of this model (single FFN, no routing) which you can find on the "`Old`" branch of this repo beat gpt-2 large in 2h36 when trained on a node of 8 AMD MI300X with ~300M parameters.
 
@@ -11,7 +11,7 @@ This project provides the full codebase, from the architectural backbone and dat
 
 ## ✨ Key Features
 
--   **Mixture-of-Latents Attention (MLA):** A novel attention mechanism first introduced in the [Deepseek-V3 paper](https://arxiv.org/pdf/2412.19437) that splits query and key projections into two paths: a content-based path and a rotary-based path. This allows the model to separately process and weigh contextual information and positional information, leading to more nuanced text generation.
+-   **Multi Latent Attention (MLA):** A novel attention mechanism first introduced in the [Deepseek-V3 paper](https://arxiv.org/pdf/2412.19437) that splits query and key projections into two paths: a content-based path and a rotary-based path. This allows the model to separately process and weigh contextual information and positional information, leading to more nuanced text generation.
 -   **Mixture-of-Experts (MoE) Layers:** The feed-forward network in each Transformer block is replaced with a sparse MoE layer. This allows the model to have a very high parameter count while only activating a small subset of expert networks for each token, drastically improving training and inference efficiency. The router architecture was inspired by the [HuggingFace post on MoE's](https://huggingface.co/blog/moe).
 -   **Rotary Position Embeddings (RoPE):** Implements state-of-the-art relative position embeddings, which are embedded into the MLA mechanism.
 -   **Distributed Training Ready:** Includes a script (`main_distributed.py`) that leverages PyTorch's `DistributedDataParallel` (DDP) for robust and scalable multi-GPU training (tested on a node of 8 AMD MI300X).
@@ -26,7 +26,7 @@ This repository is organized to provide a clear path from understanding the mode
 
 -   **`model.py`**: This is the heart of the project. It defines the complete model architecture, including:
     -   `TheTransformer`: The main class that assembles the entire model.
-    -   `MultiHeadAttention`: The custom Mixture-of-Latents Attention implementation.
+    -   `MultiHeadAttention`: The custom Multi Latent Attention implementation.
     -   `GatingNetwork` & `TransformerBlock`: The core components for the Mixture-of-Experts (MoE) layers.
     -   `RotaryPositionEncoding`: The implementation for RoPE.
 
