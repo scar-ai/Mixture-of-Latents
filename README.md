@@ -5,7 +5,7 @@
 
 This repository contains the complete implementation of a sophisticated Transformer-based language model, featuring a unique **Multi Latent Attention (MLA)** mechanism and a **Mixture-of-Experts (MoE)** feed-forward layer. The model is designed for high-performance text generation and is built to scale efficiently using distributed training.
 
-A regular transformer version of this model (single FFN, no routing) which you can find on the "`Old`" branch of this repo beat gpt-2 largés testing perplexity on wikitext-2 in 2h36 when trained on a node of 8 AMD MI300X with ~300M parameters.
+A regular transformer version of this model (single FFN, no routing) which you can find on the "`Old`" branch of this repo beat gpt-2 large testing perplexity on wikitext-2 in 2h36 when trained on a node of 8 AMD MI300X with ~300M parameters.
 
 This project provides the full codebase, from the architectural backbone and data processing pipelines to single-GPU and distributed training scripts, and a ready-to-use interactive Streamlit application for inference.
 
