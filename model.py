@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import math
+from typing import Optional, Tuple
+from torch.utils.checkpoint import checkpoint
 
 class LearnablePosEmb(nn.Module):
     def __init__(self, dim, max_positions=10000):
@@ -11,6 +13,9 @@ class LearnablePosEmb(nn.Module):
 
         self.weights = nn.Parameter(torch.zeros(1, dim))
         self.bias = nn.Parameter(torch.zeros(1, dim))
+        
+        self.register_buffer('pos_cache', torch.zeros(max_positions, dim))
+        self.cache_filled = False
 
         self._init_with_sinusoidal()
 
@@ -26,17 +31,21 @@ class LearnablePosEmb(nn.Module):
             self.weights.data.copy_(sinusoidal.mean(0, keepdim=True))
             self.bias.data.copy_(sinusoidal.std(0, keepdim=True))
 
+    def _fill_cache(self, device):
+        if not self.cache_filled or self.pos_cache.device != device:
+            half_dim = self.dim // 2
+            emb = math.log(self.max_positions) / (half_dim - 1)
+            emb = torch.exp(torch.arange(half_dim, device=device, dtype=torch.float) * -emb)
+            pos = torch.arange(self.max_positions, device=device, dtype=torch.float).unsqueeze(1)
+            emb = pos * emb.unsqueeze(0)
+            sinusoidal = torch.cat((emb.sin(), emb.cos()), dim=-1)
+            with torch.no_grad():
+                self.pos_cache[:self.max_positions].copy_(sinusoidal * self.weights + self.bias)
+            self.cache_filled = True
+
     def forward(self, x):
-        positions = x.unsqueeze(-1)
-
-        half_dim = self.dim // 2
-        emb = math.log(self.max_positions) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, device=x.device) * -emb)
-        emb = positions * emb.unsqueeze(0)
-        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
-
-        return emb * self.weights + self.bias
-
+        self._fill_cache(x.device)
+        return self.pos_cache.index_select(0, x.long())
 
 class RotaryPositionEncoding(nn.Module):
     def __init__(self, dim):
@@ -45,17 +54,25 @@ class RotaryPositionEncoding(nn.Module):
         self.dim = dim
         inv_freq = 1.0 / (10000 ** (torch.arange(0, dim, 2).float() / dim))
         self.register_buffer("inv_freq", inv_freq)
+        
+        self.register_buffer('pos_emb_cache', torch.zeros(0, dim))
+        self.max_cached_len = 0
 
     def forward(self, seq_len, device):
-        t = torch.arange(seq_len, device=device, dtype=self.inv_freq.dtype)
-        freqs = torch.einsum("i,j->ij", t, self.inv_freq)
-        emb = torch.cat((freqs, freqs), dim=-1)
-        return emb.unsqueeze(0)
+        if seq_len > self.max_cached_len or self.pos_emb_cache.device != device:
+            t = torch.arange(seq_len, device=device, dtype=torch.float)
+            freqs = torch.einsum("i,j->ij", t, self.inv_freq)
+            emb = torch.cat((freqs, freqs), dim=-1)
+            self.pos_emb_cache = emb.unsqueeze(0)
+            self.max_cached_len = seq_len
+        return self.pos_emb_cache
 
+@torch.jit.script
 def rotate_half(x):
     x1, x2 = x.chunk(2, dim=-1)
     return torch.cat((-x2, x1), dim=-1)
 
+@torch.jit.script
 def apply_rotary_pos_emb(x, pos_emb):
     cos = pos_emb.cos()
     sin = pos_emb.sin()
@@ -68,36 +85,45 @@ class MultiHeadAttention(nn.Module):
         assert d_rope % 2 == 0, "d_rope must be even for RoPE"
         
         self.embed_dim = embed_dim
+        self.latent_dim = d_compr
         self.num_heads = num_heads
-        self.head_dim = embed_dim // num_heads
+        self.head_dim = self.latent_dim // self.num_heads
         self.scale = 1.0 / math.sqrt(self.head_dim)
 
-
+        self.q_proj = nn.Linear(embed_dim, embed_dim)
+        self.kv_proj = nn.Linear(embed_dim, 2 * embed_dim)
+        
         self.C_Q = nn.Linear(embed_dim, d_compr)
-        self.C_Q_C = nn.Linear(d_compr, embed_dim - d_rope)
+        self.C_Q_C = nn.Linear(d_compr, d_compr - d_rope)
         self.C_Q_R = nn.Linear(embed_dim, d_rope)
         
         self.C_KV = nn.Linear(embed_dim, d_compr)
         self.C_K_R = nn.Linear(embed_dim, d_rope)
-        self.C_K_C = nn.Linear(d_compr, embed_dim - d_rope)
-        self.C_V = nn.Linear(d_compr, embed_dim)
+        self.C_K_C = nn.Linear(d_compr, d_compr - d_rope)
+        self.C_V = nn.Linear(d_compr, d_compr)
 
         self.activation = nn.GELU()
 
         self.rotary_pos_enc = RotaryPositionEncoding(d_rope)
 
-        self.out_proj = nn.Linear(embed_dim, embed_dim)
+        self.out_proj = nn.Linear(d_compr, embed_dim)
         self.dropout = nn.Dropout(dropout)
+        
+        self.register_buffer('causal_mask_cache', torch.zeros(0, 0, dtype=torch.bool))
+        self.max_cached_seq_len = 0
 
-    def generate_causal_mask(self, seq_len, device):
-        mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool, device=device), diagonal=1)
-        return mask
+    def _get_causal_mask(self, seq_len, device):
+        if seq_len > self.max_cached_seq_len or self.causal_mask_cache.device != device:
+            mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool, device=device), diagonal=1)
+            self.causal_mask_cache = mask
+            self.max_cached_seq_len = seq_len
+        return self.causal_mask_cache[:seq_len, :seq_len]
 
     def forward(self, x, mask=None):
         batch_size, seq_len, _ = x.shape
 
         if mask is None:
-            mask = self.generate_causal_mask(seq_len, x.device)
+            mask = self._get_causal_mask(seq_len, x.device)
 
         C_Q_proj = self.activation(self.C_Q(x))
         C_Q_C_proj = self.C_Q_C(C_Q_proj)
@@ -106,7 +132,7 @@ class MultiHeadAttention(nn.Module):
         C_KV_proj = self.activation(self.C_KV(x))
         C_K_R_proj = self.C_K_R(x)
         C_K_C_proj = self.C_K_C(C_KV_proj)
-        V = self.C_V(C_KV_proj).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        
 
         pos_emb = self.rotary_pos_enc(seq_len, x.device)
         C_Q_R_proj = apply_rotary_pos_emb(C_Q_R_proj, pos_emb)
@@ -114,24 +140,25 @@ class MultiHeadAttention(nn.Module):
 
         Q = self.activation(torch.cat((C_Q_C_proj, C_Q_R_proj), dim=-1))
         K = self.activation(torch.cat((C_K_C_proj, C_K_R_proj), dim=-1))
+        V = self.C_V(C_KV_proj)
+
 
         Q = Q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         K = K.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        V = V.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+
 
         attn_scores = torch.matmul(Q, K.transpose(-2, -1)) * self.scale
-
-        attn_scores = attn_scores.clamp(min=-1e4, max=1e4)
         attn_scores = attn_scores.masked_fill(mask.unsqueeze(0).unsqueeze(0), float('-inf'))
-
         attn_weights = F.softmax(attn_scores, dim=-1)
-        attn_weights = torch.nan_to_num(attn_weights, nan=0.0, posinf=0.0, neginf=0.0)
         attn_weights = self.dropout(attn_weights)
 
         attn_output = torch.matmul(attn_weights, V)
         attn_output = attn_output.transpose(1, 2).contiguous()
-        attn_output = attn_output.view(batch_size, seq_len, self.embed_dim)
+        attn_output = attn_output.view(batch_size, seq_len, self.latent_dim)
         
         return self.out_proj(attn_output)
+
 
 class GatingNetwork(nn.Module):
     def __init__(self, embed_dim, num_experts, top_k, noise_std=1.0):
